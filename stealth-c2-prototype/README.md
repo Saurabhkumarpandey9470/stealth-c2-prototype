@@ -53,11 +53,24 @@ DNS tunneling encrypts payloads within TXT records.
 - **Domain Generation Algorithm (DGA)** Generates daily-changing domains (e.g., a1b2c3d4e5.c2.example.com) to evade domain-based blocking.
 - **macOS Persistence** Uses LaunchAgent plist files to run the agent at login on macOS systems.
 
-Pros
-Highly Stealthy: DNS tunneling, DGA, anti-VM checks, and randomized beacons evade most network and endpoint detection.
-Cross-Platform: Supports persistence on Windows, Linux, and macOS, broadening research applicability.
-Educational: Teaches advanced evasion techniques like DGA, DNS tunneling, and anti-debugging.
-Flexible: Adapts to RAT, dedicated server, or botnet scenarios with diverse task types (e.g., remote shell, system info).
-Secure: TLS, Fernet encryption, and HMAC ensure safe communication in controlled demos.
-Collaborative: GitHub-ready for group contributions, ideal for workshops or CTFs
+## Pros ##
+- **Highly Stealthy**: DNS tunneling, DGA, anti-VM checks, and randomized beacons evade most network and endpoint detection.
+- **Cross-Platform**: Supports persistence on Windows, Linux, and macOS, broadening research applicability.
+- **Educational**: Teaches advanced evasion techniques like DGA, DNS tunneling, and anti-debugging.
+- **Flexible**: Adapts to RAT, dedicated server, or botnet scenarios with diverse task types (e.g., remote shell, system info).
+- **Secure**: TLS, Fernet encryption, and HMAC ensure safe communication in controlled demos.
+- **Collaborative**: GitHub-ready for group contributions, ideal for workshops or CTFs
+
+## Cons ##
+- **Advanced EDR Detection** : Behavioral analysis (e.g., CrowdStrike, SentinelOne) may detect DNS tunneling or persistence mechanisms.
+- **DNS Setup Complexity** : custom DNS server requires network configuration expertise, especially for production.
+- **DNS tunneling** : is slower than HTTPS for large data transfers (e.g., file uploads).
+- **Platform Gaps** : While macOS is supported, mobile platforms or advanced anti-forensic techniques need further development.
+
+## Setup Guide ##
+System Requirements:
+
+- Python 3.8+ installed on the server and test VMs (Windows, Linux, or macOS).
+- Administrative privileges for DNS server setup and persistence mechanisms.
+- A test environment with isolated VMs (e.g., VirtualBox, VMware) and snapshots.
 
