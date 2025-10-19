@@ -1,0 +1,5 @@
+requests
+cryptography
+pynput
+pillow
+dnslib
