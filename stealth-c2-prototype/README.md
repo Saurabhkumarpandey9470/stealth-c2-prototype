@@ -53,4 +53,11 @@ DNS tunneling encrypts payloads within TXT records.
 - **Domain Generation Algorithm (DGA)** Generates daily-changing domains (e.g., a1b2c3d4e5.c2.example.com) to evade domain-based blocking.
 - **macOS Persistence** Uses LaunchAgent plist files to run the agent at login on macOS systems.
 
-  
+Pros
+Highly Stealthy: DNS tunneling, DGA, anti-VM checks, and randomized beacons evade most network and endpoint detection.
+Cross-Platform: Supports persistence on Windows, Linux, and macOS, broadening research applicability.
+Educational: Teaches advanced evasion techniques like DGA, DNS tunneling, and anti-debugging.
+Flexible: Adapts to RAT, dedicated server, or botnet scenarios with diverse task types (e.g., remote shell, system info).
+Secure: TLS, Fernet encryption, and HMAC ensure safe communication in controlled demos.
+Collaborative: GitHub-ready for group contributions, ideal for workshops or CTFs
+
