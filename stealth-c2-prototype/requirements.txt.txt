@@ -2,4 +2,5 @@ requests
 cryptography
 pynput
 pillow
+psutil
 dnslib
